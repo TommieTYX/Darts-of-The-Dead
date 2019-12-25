@@ -61,4 +61,8 @@ public class AlliesStageHandler : MonoBehaviour
     public bool hasGreenLeft() {
         return GameState.alliesStageGreen.Count > 0;
     }
+
+    public bool hasRedLeft() {
+        return GameState.alliesStageRed.Count > 0;
+    }
 }

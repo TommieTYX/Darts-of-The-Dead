@@ -16,6 +16,9 @@ public class GameManager : MonoBehaviour
     public GameObject alliesStagePanel;
     public Button backToMenuBtn;
     public Button gameOverBackToMenuBtn;
+    public AudioClip shotgunFiredClip;
+    public AudioClip missedClip;
+    public AudioSource audioSource;
     #endregion
 
     #region PRIVATE_VAR
@@ -36,6 +39,7 @@ public class GameManager : MonoBehaviour
     public TextMeshProUGUI playerThrowCounter;
     public TextMeshProUGUI stageCounter;
     public TextMeshProUGUI healthCounter;
+    public TextMeshProUGUI alliesHitArea;
 
     void Start()
     {
@@ -63,10 +67,7 @@ public class GameManager : MonoBehaviour
 
         backToMenuBtn.onClick.AddListener(backToMenuOnClick);
         gameOverBackToMenuBtn.onClick.AddListener(backToMenuOnClick);
-
-        //DEBUG
-        debugButtons();
-
+        
         isInitDone = true;
     }
 
@@ -103,22 +104,21 @@ public class GameManager : MonoBehaviour
         playerTurnsPerStage--;
         stageCounter.SetText(stage + " / 10");       
 
-        if (!(stage == 3 || stage == 8)) {
+        if (!isAllyStage()) {
             while (p.haveTurnLeft() && zombieHealth > 0) {
                 registerDartInput(p, false);
                 playerThrowCounter.SetText(p.numOfTurns + " / 3");
                 yield return null;
             }
-
             overlayPanel.SetActive(true);
-            yield return new WaitUntil(() => Input.GetKeyDown(GameState.nextPlayerBtnKeyCode) || debug4Press);
 
-            debug4Press = false;
+            yield return new WaitUntil(() => (!p.haveTurnLeft() || zombieHealth <= 0) && Input.GetKeyDown(GameState.nextPlayerBtnKeyCode));
 
             if (zombieHealth <= 0) {
                 stage++;
                 playerTurnsPerStage = GameState.playerList.Count;
                 initZombieLifeCounter(GameState.playerList.Count, stage);
+                playerQueueHandler.playerEndTurn(); // move current player to the last
                 playerQueueHandler.requeueWaitingPlayers();
             } else if (playerTurnsPerStage <= 0) {
                 zombieAttack();
@@ -142,36 +142,42 @@ public class GameManager : MonoBehaviour
                 alliesStageHandler.initAliiesStage();
             }
 
-            while (p.haveTurnLeft() && alliesStageHandler.hasGreenLeft()) {
+
+            //TODO: HIT RED DID NOT END THE ALLY STAGE
+            //TODO: FINISH GREEN ALLY STAGE OVERLAY REMOVED BUT STUCK WITH NEXT PLAYER OVERLAY
+            while (p.haveTurnLeft() && (alliesStageHandler.hasGreenLeft() && alliesStageHandler.hasRedLeft())) {
                 registerDartInput(p, true);
                 playerThrowCounter.SetText(p.numOfTurns + " / 3");
+
+                alliesHitArea.SetText("");
+                Debug.Log(GameState.alliesStageGreen.Count > 0);
+                foreach (List<int> innerList in GameState.alliesStageGreen) {
+                    foreach (int g in innerList) {
+                        alliesHitArea.text += g + " ";
+                    }
+                    alliesHitArea.text += "\r\n";
+                }
+
+                foreach (List<int> innerList in GameState.alliesStageRed) {
+                    alliesHitArea.text += "**";
+                    foreach (int r in innerList) {
+                        alliesHitArea.text += r + " ";
+                    }
+                    alliesHitArea.text += "**\r\n";
+                }
+
                 yield return null;
             }
-
-
-
-
-
-
-
             overlayPanel.SetActive(true);
-            yield return new WaitUntil(() => Input.GetKeyDown(GameState.nextPlayerBtnKeyCode) || debug4Press);
 
-            debug4Press = false;
+            yield return new WaitUntil(() => (!p.haveTurnLeft() || zombieHealth <= 0 || GameState.alliesStageGreen.Count == 0 || GameState.alliesStageRed.Count == 0) && Input.GetKeyDown(GameState.nextPlayerBtnKeyCode));
 
-            if (zombieHealth <= 0) {
+            // TURN OFF ALLIES STAGE PANEL AFTER ALL PLAY FINISH TURNS
+
+            if (playerTurnsPerStage <= 0) {
                 stage++;
-                playerTurnsPerStage = GameState.playerList.Count;
-                initZombieLifeCounter(GameState.playerList.Count, stage);
+                alliesStagePanel.SetActive(false);
                 playerQueueHandler.requeueWaitingPlayers();
-            } else if (playerTurnsPerStage <= 0) {
-                zombieAttack();
-
-                if (health <= 0) {
-                    gameOverPanel.SetActive(true);
-                } else {
-                    playerQueueHandler.requeueWaitingPlayers();
-                }
             } else {
                 playerQueueHandler.playerEndTurn();
             }
@@ -189,130 +195,70 @@ public class GameManager : MonoBehaviour
 
     private void registerDartInput(Player p, bool isAlliesStage) {
         if (Input.anyKeyDown) {
-            string input = Input.inputString;
+            string input = Input.inputString;            
 
             for (int i = 0; i < GameState.pointLUT.Count; i++) {
                 if (GameState.pointLUT[i].Contains(input)) {
+
+                    playSoundClip(shotgunFiredClip);
+
                     if (!isAlliesStage) {
-                        zombieHealth -= (GameState.pointLUT[i].IndexOf(input) + 1) * (i == 0 ? 25 : i);
+                        zombieHealth -= i == 0 ? 50 : (GameState.pointLUT[i].IndexOf(input) + 1) * (i == 0 ? 25 : (i == 4) ? 1 : i);
                         zombieLifeCounter.SetText(zombieHealth.ToString());
 
                         p.tookATurn();
                     } else {
                         //ALLIES STAGE
-                        int basePointFromLUT = (GameState.pointLUT[i].IndexOf(input) + 1) * (i == 0 ? 25 : i);
-                        bool hasThrown = false;
+                        int basePointFromLUT = i == 0 ? 50 : GameState.pointLUT[i].IndexOf(input) + 1;
+
+                        Debug.Log(basePointFromLUT);
+
+                        bool hitGreen = false;
+                        bool hitRed = false;
 
                         for (int g = 0; g < GameState.alliesStageGreen.Count; g++) {
                             if (GameState.alliesStageGreen[g].Contains(basePointFromLUT)) {
                                 GameState.alliesStageGreen.RemoveAt(g);
+                                hitGreen = true;
                             }
                         }
 
                         for (int r = 0; r < GameState.alliesStageRed.Count; r++) {
-                            if (GameState.alliesStageGreen[r].Contains(basePointFromLUT)) {
-                                GameState.alliesStageGreen.RemoveAt(r);
+                            if (GameState.alliesStageRed[r].Contains(basePointFromLUT)) {
+                                GameState.alliesStageRed.RemoveAt(r);
+                                hitRed = true;
                             }
                         }
-
-                        hasThrown = true; //else count as missed
-                        p.tookATurn();
-
-                        //Debug.Log("HIT GREEN2 "+ Input.inputString + " ----  " + System.Int32.Parse(Input.inputString));
-                        Debug.Log((GameState.pointLUT[i].IndexOf(input) + 1) * (i == 0 ? 25 : i));
+                        if (hitRed) {
+                            p.tookAllTurns();
+                        } else {
+                            if (!hitGreen)
+                            {
+                                playSoundClip(missedClip);
+                            }
+                            p.tookATurn();
+                        }
                     }
                 }
             }  
         }
-
-        //DEBUG
-        if (debug1Press) {
-            zombieHealth -= 20;
-            zombieLifeCounter.SetText(zombieHealth.ToString());
-
-            p.tookATurn();
-            debug1Press = false;
-        }
-        if (debug2Press) {
-            zombieHealth -= 40;
-            zombieLifeCounter.SetText(zombieHealth.ToString());
-
-            p.tookATurn();
-            debug2Press = false;
-        }
-        if (debug3Press) {
-            zombieHealth -= 60;
-            zombieLifeCounter.SetText(zombieHealth.ToString());
-
-            p.tookATurn();
-            debug3Press = false;
-        }
     }
 
-
-    
-
-    private void alliesStage() {
-        //INIT
-        GameState.alliesStageGreen = new List<List<int>>();
-        GameState.alliesStageRed = new List<List<int>>();
-
-        //GREEN QUADRANT
-        int rangeStart = Random.Range(0, 19);
-        for (int i = 0; i < 4; i++) {
-            List<int> tempList = new List<int>() {
-                    GameState.boardPointsOrder[rangeStart = CommonUtils.getNextInt_wrappedAround(0, 19, rangeStart)],
-                    GameState.boardPointsOrder[rangeStart = CommonUtils.getNextInt_wrappedAround(0, 19, rangeStart)],
-                    GameState.boardPointsOrder[rangeStart = CommonUtils.getNextInt_wrappedAround(0, 19, rangeStart)]
-                };
-
-            rangeStart = CommonUtils.getNextInt_wrappedAround(0, 19, rangeStart);
-            GameState.alliesStageGreen.Add(tempList);
-        }
-
-        //RED QUADRANT
-        for (int i = 0; i < 1; i++) {
-            List<int> tempList = new List<int>() {
-                    GameState.boardPointsOrder[rangeStart = CommonUtils.getNextInt_wrappedAround(0, 19, rangeStart)],
-                    GameState.boardPointsOrder[rangeStart = CommonUtils.getNextInt_wrappedAround(0, 19, rangeStart)],
-                    GameState.boardPointsOrder[rangeStart = CommonUtils.getNextInt_wrappedAround(0, 19, rangeStart)]
-                };
-
-            rangeStart = CommonUtils.getNextInt_wrappedAround(0, 19, rangeStart);
-            GameState.alliesStageRed.Add(tempList);
-        }
+    private void playSoundClip(AudioClip ac)
+    {
+        audioSource.clip = ac;
+        audioSource.Play();
     }
 
-
-    
+    private bool isAllyStage()
+    {
+        return stage == 3 || stage == 8;
+    }    
     #endregion
 
     #region UI_LOGICS
     void backToMenuOnClick() {
         SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex - 1);
     }
-    #endregion
-
-    #region DEBUG
-    public Button debug1;
-    public Button debug2;
-    public Button debug3;
-    public Button debug4;
-
-    private bool debug1Press = false;
-    private bool debug2Press = false;
-    private bool debug3Press = false;
-    private bool debug4Press = false;
-
-    void debugButtons() {
-        debug1.onClick.AddListener(minus20hp);
-        debug2.onClick.AddListener(minus40hp);
-        debug3.onClick.AddListener(minus60hp);
-        debug4.onClick.AddListener(debugNext);
-    }
-    void minus20hp() { debug1Press = true; }
-    void minus40hp() { debug2Press = true; }
-    void minus60hp() { debug3Press = true; }
-    void debugNext() { debug4Press = true; }
     #endregion
 }

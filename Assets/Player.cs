@@ -18,6 +18,11 @@
         numOfTurns--;
     }
 
+    public void tookAllTurns()
+    {
+        numOfTurns = 0;
+    }
+
     public void endTurn() {
         numOfTurns = 3;
     }

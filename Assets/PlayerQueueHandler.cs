@@ -92,6 +92,8 @@ public class PlayerQueueHandler : MonoBehaviour
         while (GameState.waitingQueue.Count > 0) {
             GameState.playingQueue.Enqueue(GameState.waitingQueue.Dequeue());
         }
+
+        updateQueue();
     }
 
 
